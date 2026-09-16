@@ -1,2 +1,0 @@
-#!/bin/bash
-exec "/home/kali/workspace/ImpersoTater/.venv/bin/python3" "/home/kali/workspace/ImpersoTater/ImpersoTater.py" "$@"
