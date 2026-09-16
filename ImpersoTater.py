@@ -191,9 +191,8 @@ def enumerate_target(sql):
 
 def build_add_user_cmd(spec):
     if spec == '_generate_':
-        import random, string
-        user = 'svc_' + ''.join(random.choices(string.ascii_lowercase, k=5))
-        passwd = ''.join(random.choices(string.ascii_letters + string.digits + '!@#$', k=14))
+        user = 'tater'
+        passwd = 'Imp3rs0T@ter!'
     elif ':' in spec:
         user, passwd = spec.split(':', 1)
     else:
