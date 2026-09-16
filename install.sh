@@ -30,20 +30,13 @@ fi
 echo "[*] Installing Python dependencies..."
 "$DIR/.venv/bin/pip" install -q impacket
 
-# Install to PATH
-WRAPPER="#!/bin/bash
-exec \"$DIR/.venv/bin/python3\" \"$DIR/ImpersoTater.py\" \"\$@\""
-
-_install_wrapper() {
-    echo "$WRAPPER" > "$1"
-    chmod +x "$1"
-}
+# Make .py executable and symlink to PATH
+chmod +x "$DIR/ImpersoTater.py"
 
 if [ -w /usr/local/bin ]; then
-    _install_wrapper /usr/local/bin/ImpersoTater
+    ln -sf "$DIR/ImpersoTater.py" /usr/local/bin/ImpersoTater
 elif command -v sudo &>/dev/null; then
-    echo "$WRAPPER" | sudo tee /usr/local/bin/ImpersoTater >/dev/null
-    sudo chmod +x /usr/local/bin/ImpersoTater
+    sudo ln -sf "$DIR/ImpersoTater.py" /usr/local/bin/ImpersoTater
 fi
 
 if command -v ImpersoTater &>/dev/null; then
