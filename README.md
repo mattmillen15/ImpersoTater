@@ -47,7 +47,7 @@ This creates a Python venv, installs impacket, installs `mono-mcs` if needed, an
 | `-d DOMAIN` | Domain for Windows auth |
 | `-w` | Force Windows authentication |
 | `-c CMD` | Command to execute as SYSTEM |
-| `--technique` | `auto`, `spooler`, or `direct` (default: auto) |
+| `--technique` | `auto`, `dcom`, `spooler`, or `direct` (default: auto) |
 | `--add-user [U:P]` | Create local admin (default: `tater` / `Imp3rs0T@ter!`) |
 | `--no-cleanup` | Leave CLR assembly deployed |
 
@@ -69,14 +69,17 @@ This creates a Python venv, installs impacket, installs `mono-mcs` if needed, an
 
 ## Techniques
 
-### spooler (default when Print Spooler is running)
-Creates a named pipe matching the spooler pattern (`\\.\pipe\<random>\pipe\spoolss`) and triggers `OpenPrinterW` to make the Print Spooler connect. The pipe client connection provides impersonation context that enables opening other processes for handle duplication.
+### dcom (default, most reliable)
+GodPotato-style DCOM/OXID resolver attack. Creates a fake OXID resolver on a random TCP port, builds an OBJREF that points to it, and triggers `CoUnmarshalInterface`. RPCSS (running as `NT AUTHORITY\SYSTEM`) contacts the fake resolver, which redirects it to a named pipe. Impersonating the pipe client yields a SYSTEM token directly. Works on domain service accounts where spooler-based techniques fail.
+
+### spooler
+Creates a named pipe matching the spooler pattern (`\\.\pipe\<random>\pipe\spoolss`) and triggers `OpenPrinterW` to make the Print Spooler connect. The pipe client connection provides impersonation context that enables opening other processes for handle duplication. Requires Print Spooler service to be running.
 
 ### direct
 Scans handles without triggering any service. First checks handles in the current process, then attempts to duplicate from other processes. Works when the service account already has sufficient access to open other processes (e.g., when running as `LOCAL SYSTEM` or with `SeDebugPrivilege`).
 
 ### auto
-Tries `spooler` first (if the Print Spooler service is running), falls back to `direct`.
+Tries `dcom` first, falls back to `spooler` (if Print Spooler is running), then `direct`.
 
 ## Lab Example
 

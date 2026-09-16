@@ -252,7 +252,7 @@ def parse_args():
     action.add_argument('--add-user', nargs='?', const='_generate_',
                         metavar='USER:PASS',
                         help='Create local admin. USER:PASS or auto-generated if omitted')
-    p.add_argument('--technique', choices=['auto', 'spooler', 'direct'],
+    p.add_argument('--technique', choices=['auto', 'dcom', 'spooler', 'direct'],
                    default='auto', help='Privilege escalation technique (default: auto)')
     p.add_argument('--no-cleanup', action='store_true',
                    help='Leave CLR assembly deployed after execution')
