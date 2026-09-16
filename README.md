@@ -32,9 +32,6 @@ This creates a Python venv, installs impacket, installs `mono-mcs` if needed, an
 # Select technique
 ./ImpersoTater ecorp/admin:Pass@10.0.0.5 -c "whoami" --technique spooler
 
-# Enumerate only (no exploitation)
-./ImpersoTater -t 10.0.0.5 -u sa -p Password1 --enum-only
-
 # Leave assembly deployed for multiple commands
 ./ImpersoTater ecorp/admin:Pass@10.0.0.5 -c "whoami" --no-cleanup
 ```
@@ -53,7 +50,6 @@ This creates a Python venv, installs impacket, installs `mono-mcs` if needed, an
 | `--technique` | `auto`, `spooler`, or `direct` (default: auto) |
 | `--add-user [U:P]` | Create local admin (default: `tater` / `Imp3rs0T@ter!`) |
 | `--no-cleanup` | Leave CLR assembly deployed |
-| `--enum-only` | Only enumerate, don't exploit |
 
 ## How It Works
 

