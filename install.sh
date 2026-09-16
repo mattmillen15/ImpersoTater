@@ -33,9 +33,21 @@ echo "[*] Installing Python dependencies..."
 # Create wrapper script
 cat > "$DIR/ImpersoTater" << 'WRAPPER'
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
+SELF="$0"
+[ -L "$SELF" ] && SELF="$(readlink -f "$SELF")"
+DIR="$(cd "$(dirname "$SELF")" && pwd)"
 exec "$DIR/.venv/bin/python3" "$DIR/ImpersoTater.py" "$@"
 WRAPPER
 chmod +x "$DIR/ImpersoTater"
 
-echo "[+] Installed. Run with: ./ImpersoTater -t HOST -u USER -p PASS -c CMD"
+if [ -w /usr/local/bin ]; then
+    ln -sf "$DIR/ImpersoTater" /usr/local/bin/ImpersoTater
+elif command -v sudo &>/dev/null; then
+    sudo ln -sf "$DIR/ImpersoTater" /usr/local/bin/ImpersoTater
+fi
+
+if command -v ImpersoTater &>/dev/null; then
+    echo "[+] Installed. Run with: ImpersoTater -t HOST -u USER -p PASS -c CMD"
+else
+    echo "[+] Installed. Run with: ./ImpersoTater -t HOST -u USER -p PASS -c CMD"
+fi
