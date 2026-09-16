@@ -15,6 +15,7 @@ Usage:
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import io
@@ -61,6 +62,10 @@ def compile_dll():
 
     if not os.path.isfile(cs_core) or not os.path.isfile(cs_sql):
         print('[!] C# source files not found', file=sys.stderr)
+        sys.exit(1)
+
+    if not shutil.which('mcs'):
+        print('[!] mcs (Mono C# compiler) not found. Run: ./install.sh', file=sys.stderr)
         sys.exit(1)
 
     cmd = ['mcs', '-target:library', '-out:' + dll_path,
