@@ -30,24 +30,24 @@ fi
 echo "[*] Installing Python dependencies..."
 "$DIR/.venv/bin/pip" install -q impacket
 
-# Create wrapper script
-cat > "$DIR/ImpersoTater" << 'WRAPPER'
-#!/bin/bash
-SELF="$0"
-[ -L "$SELF" ] && SELF="$(readlink -f "$SELF")"
-DIR="$(cd "$(dirname "$SELF")" && pwd)"
-exec "$DIR/.venv/bin/python3" "$DIR/ImpersoTater.py" "$@"
-WRAPPER
-chmod +x "$DIR/ImpersoTater"
+# Install to PATH
+WRAPPER="#!/bin/bash
+exec \"$DIR/.venv/bin/python3\" \"$DIR/ImpersoTater.py\" \"\$@\""
+
+_install_wrapper() {
+    echo "$WRAPPER" > "$1"
+    chmod +x "$1"
+}
 
 if [ -w /usr/local/bin ]; then
-    ln -sf "$DIR/ImpersoTater" /usr/local/bin/ImpersoTater
+    _install_wrapper /usr/local/bin/ImpersoTater
 elif command -v sudo &>/dev/null; then
-    sudo ln -sf "$DIR/ImpersoTater" /usr/local/bin/ImpersoTater
+    echo "$WRAPPER" | sudo tee /usr/local/bin/ImpersoTater >/dev/null
+    sudo chmod +x /usr/local/bin/ImpersoTater
 fi
 
 if command -v ImpersoTater &>/dev/null; then
     echo "[+] Installed. Run with: ImpersoTater -t HOST -u USER -p PASS -c CMD"
 else
-    echo "[+] Installed. Run with: ./ImpersoTater -t HOST -u USER -p PASS -c CMD"
+    echo "[+] Installed. Run with: python3 $DIR/ImpersoTater.py -t HOST -u USER -p PASS -c CMD"
 fi

