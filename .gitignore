@@ -1,0 +1,5 @@
+.venv/
+ImpersoTater
+*.dll
+*.pyc
+__pycache__/

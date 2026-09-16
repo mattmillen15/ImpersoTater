@@ -1,26 +1,41 @@
 #!/bin/bash
-# ImpersoTater dependencies
-
 set -e
 
-echo "[*] Installing ImpersoTater dependencies..."
+DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Detect package manager
-if command -v apt-get &>/dev/null; then
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq mono-mcs python3-pip
-elif command -v dnf &>/dev/null; then
-    sudo dnf install -y mono-core python3-pip
-elif command -v pacman &>/dev/null; then
-    sudo pacman -S --noconfirm mono python-pip
-else
-    echo "[!] Unsupported package manager. Install manually:"
-    echo "    - mono (provides mcs compiler)"
-    echo "    - python3 + pip"
-    exit 1
+echo "[*] Installing ImpersoTater..."
+
+# System dependency: mono mcs compiler
+if ! command -v mcs &>/dev/null; then
+    echo "[*] Installing mono-mcs..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq mono-mcs
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y mono-core
+    elif command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm mono
+    else
+        echo "[!] Install mono (provides mcs) manually"
+        exit 1
+    fi
 fi
 
-# Python dependency
-pip3 install impacket 2>/dev/null || pip3 install impacket --break-system-packages
+# Python venv + impacket
+if [ ! -d "$DIR/.venv" ]; then
+    echo "[*] Creating venv..."
+    python3 -m venv "$DIR/.venv"
+fi
 
-echo "[+] Done. Test with: mcs --version && python3 -c 'from impacket import tds; print(\"impacket OK\")'"
+echo "[*] Installing Python dependencies..."
+"$DIR/.venv/bin/pip" install -q impacket
+
+# Create wrapper script
+cat > "$DIR/ImpersoTater" << 'WRAPPER'
+#!/bin/bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$DIR/.venv/bin/python3" "$DIR/ImpersoTater.py" "$@"
+WRAPPER
+chmod +x "$DIR/ImpersoTater"
+
+echo "[+] Installed. Run with: ./ImpersoTater -t HOST -u USER -p PASS -c CMD"

