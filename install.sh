@@ -30,17 +30,25 @@ fi
 echo "[*] Installing Python dependencies..."
 "$DIR/.venv/bin/pip" install -q impacket
 
-# Make .py executable and symlink to PATH
-chmod +x "$DIR/ImpersoTater.py"
+# Create wrapper script that uses the venv Python
+# Remove old symlink first (previous installs symlinked .py directly)
+if [ -L /usr/local/bin/ImpersoTater ]; then
+    rm -f /usr/local/bin/ImpersoTater 2>/dev/null || sudo rm -f /usr/local/bin/ImpersoTater
+fi
+
+WRAPPER='#!/bin/bash
+exec "'"$DIR"'/.venv/bin/python3" "'"$DIR"'/ImpersoTater.py" "$@"'
 
 if [ -w /usr/local/bin ]; then
-    ln -sf "$DIR/ImpersoTater.py" /usr/local/bin/ImpersoTater
+    echo "$WRAPPER" > /usr/local/bin/ImpersoTater
+    chmod +x /usr/local/bin/ImpersoTater
 elif command -v sudo &>/dev/null; then
-    sudo ln -sf "$DIR/ImpersoTater.py" /usr/local/bin/ImpersoTater
+    echo "$WRAPPER" | sudo tee /usr/local/bin/ImpersoTater > /dev/null
+    sudo chmod +x /usr/local/bin/ImpersoTater
 fi
 
 if command -v ImpersoTater &>/dev/null; then
     echo "[+] Installed. Run with: ImpersoTater -t HOST -u USER -p PASS -c CMD"
 else
-    echo "[+] Installed. Run with: python3 $DIR/ImpersoTater.py -t HOST -u USER -p PASS -c CMD"
+    echo "[+] Installed. Run with: $DIR/.venv/bin/python3 $DIR/ImpersoTater.py -t HOST -u USER -p PASS -c CMD"
 fi
